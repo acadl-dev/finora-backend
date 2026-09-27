@@ -12,6 +12,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/transactions")
@@ -25,7 +26,8 @@ public class TransactionController {
             @RequestBody @Valid CreateTransactionRequest request,
             @AuthenticationPrincipal Credential credential
     ) {
-        TransactionResponse created = transactionService.register(request, credential.getUser());
+        TransactionResponse created = transactionService.register(
+                request, credential.getUser(), credential.getEmail());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
@@ -34,5 +36,14 @@ public class TransactionController {
             @AuthenticationPrincipal Credential credential
     ) {
         return ResponseEntity.ok(transactionService.listByOwner(credential.getUser()));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> remove(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal Credential credential
+    ) {
+        transactionService.remove(id, credential.getUser(), credential.getEmail());
+        return ResponseEntity.noContent().build();
     }
 }

@@ -1,0 +1,23 @@
+# Infraestrutura compartilhada: message broker da arquitetura orientada a eventos.
+# Painel de gerenciamento: http://localhost:15672 (usuário finora / senha finora)
+services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: rabbitmq_finora
+    restart: always
+    ports:
+      - "5672:5672"     # AMQP (usado pelos microsserviços)
+      - "15672:15672"   # painel web de gerenciamento
+    environment:
+      - RABBITMQ_DEFAULT_USER=finora
+      - RABBITMQ_DEFAULT_PASS=finora
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  rabbitmq_data:

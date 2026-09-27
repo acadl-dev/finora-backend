@@ -37,14 +37,17 @@
 			<artifactId>spring-boot-starter-validation</artifactId>
 		</dependency>
 
-		<!-- Spring Cloud: registro no Eureka + comunicação com o finora via OpenFeign -->
+		<!-- Spring Cloud: registro no Eureka (descoberto pelo gateway-service) -->
 		<dependency>
 			<groupId>org.springframework.cloud</groupId>
 			<artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
 		</dependency>
+
+		<!-- Mensageria: consumo de eventos e fila de comandos no RabbitMQ (Spring AMQP).
+		     Substitui o OpenFeign: o reports-service não chama mais o finora de forma síncrona. -->
 		<dependency>
-			<groupId>org.springframework.cloud</groupId>
-			<artifactId>spring-cloud-starter-openfeign</artifactId>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-amqp</artifactId>
 		</dependency>
 
 		<!-- Geração da planilha Excel (.xlsx) -->

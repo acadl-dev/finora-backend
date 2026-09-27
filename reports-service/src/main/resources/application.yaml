@@ -23,13 +23,23 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
     show-sql: true
-  cloud:
-    openfeign:
-      client:
-        config:
-          finora:
-            connect-timeout: 5000
-            read-timeout: 10000
+  # RabbitMQ (docker-compose.yml na raiz de back_finora)
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:finora}
+    password: ${RABBITMQ_PASSWORD:finora}
+    listener:
+      simple:
+        acknowledge-mode: auto          # ack automático quando o listener termina sem erro
+        prefetch: 10                    # no máximo 10 mensagens "em voo" por consumidor
+        default-requeue-rejected: false # esgotadas as tentativas -> vai para a DLQ (não volta pra fila)
+        retry:
+          enabled: true                 # retry com backoff exponencial antes de desistir
+          max-attempts: 3
+          initial-interval: 1s
+          multiplier: 2.0
+          max-interval: 10s
 
 # Mesmo segredo usado pelo finora para assinar o JWT (lido do .env)
 jwt:
@@ -42,3 +52,9 @@ eureka:
   instance:
     # ambiente local: todos os serviços rodam na mesma máquina
     hostname: ${EUREKA_INSTANCE_HOSTNAME:localhost}
+
+reports:
+  dispatcher:
+    interval-ms: 30000        # reenvia comandos de relatórios parados em REQUESTED
+    stale-after-seconds: 20
+    timeout-minutes: 10       # depois disso o relatório é marcado como FAILED

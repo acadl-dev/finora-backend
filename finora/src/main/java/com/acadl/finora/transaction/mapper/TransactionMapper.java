@@ -8,9 +8,10 @@ import com.acadl.finora.transaction.model.Transaction;
 
 public class TransactionMapper {
 
-    public static Transaction toEntity(CreateTransactionRequest dto, User owner) {
+    public static Transaction toEntity(CreateTransactionRequest dto, User owner, String ownerEmail) {
         return Transaction.register(
                 owner,
+                ownerEmail,
                 dto.description(),
                 Money.of(dto.amount()),
                 dto.type(),

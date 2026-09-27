@@ -1,6 +1,7 @@
 package com.acadl.reports.report.model;
 
 import com.acadl.reports.report.exception.InvalidReportPeriodException;
+import com.acadl.reports.report.exception.ReportGenerationException;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -56,15 +57,39 @@ class FinancialReportTest {
                 expense("2026-10-01", "999")   // fora do período
         );
 
-        FinancialReport report = FinancialReport.generate(
+        FinancialReport report = FinancialReport.request(
                 "user@finora.com",
                 ReportPeriod.of(LocalDate.parse("2026-09-01"), LocalDate.parse("2026-09-30")),
-                entries, calculator, ReportFormat.XLSX);
+                ReportFormat.XLSX);
+        assertEquals(ReportStatus.REQUESTED, report.getStatus());
+        assertNull(report.getSummary());
 
+        report.complete(entries, calculator);
+
+        assertEquals(ReportStatus.READY, report.getStatus());
         assertEquals(2, report.getEntries().size());
         assertEquals(LocalDate.parse("2026-09-01"), report.getEntries().get(0).date());
         assertEquals(new BigDecimal("950.00"), report.getSummary().balance());
         assertTrue(report.getFileName().endsWith(".xlsx"));
+    }
+
+    @Test
+    void relatorioProntoNaoPodeSerGeradoDeNovo() {
+        FinancialReport report = FinancialReport.request("user@finora.com", ReportPeriod.allTime(), ReportFormat.XLSX);
+        report.complete(List.of(income("2026-09-01", "10")), calculator);
+
+        assertThrows(ReportGenerationException.class, () -> report.complete(List.of(), calculator));
+    }
+
+    @Test
+    void falhaGuardaMotivoEEncerraOCiclo() {
+        FinancialReport report = FinancialReport.request("user@finora.com", ReportPeriod.allTime(), ReportFormat.XLSX);
+        report.fail("Tempo limite excedido");
+
+        assertEquals(ReportStatus.FAILED, report.getStatus());
+        assertEquals("Tempo limite excedido", report.getFailureReason());
+        assertFalse(report.isPending());
+        assertThrows(ReportGenerationException.class, () -> report.complete(List.of(), calculator));
     }
 
     @Test

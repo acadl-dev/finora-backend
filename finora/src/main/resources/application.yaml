@@ -22,6 +22,19 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
     show-sql: true
 
+  # RabbitMQ (docker-compose.yml na raiz de back_finora)
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:finora}
+    password: ${RABBITMQ_PASSWORD:finora}
+    # Confirmação do broker por mensagem + devolução das mensagens sem fila (unroutable):
+    # o OutboxRelay só marca um evento como publicado depois do "ack" do RabbitMQ
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+
 server:
   port: 8082
 
@@ -36,3 +49,10 @@ eureka:
 # Segredo usado para assinar/validar o JWT (JwtService usa ${jwt.secret})
 jwt:
   secret: ${JWT_SECRET}
+
+# Transactional Outbox
+finora:
+  outbox:
+    relay-interval-ms: 1000      # de quanto em quanto tempo o relay procura eventos pendentes
+    confirm-timeout-ms: 5000     # espera máxima pelo "ack" do RabbitMQ
+    backfill-on-startup: true    # publica TransactionRegistered para transações antigas (antes dos eventos)

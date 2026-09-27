@@ -49,6 +49,11 @@
 			<groupId>org.springframework.cloud</groupId>
 			<artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
 		</dependency>
+		<!-- Mensageria: publicação dos eventos de domínio no RabbitMQ (Spring AMQP) -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-amqp</artifactId>
+		</dependency>
 		<!-- Implementação do Bean Validation (Hibernate Validator): sem ela o @Valid é ignorado -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

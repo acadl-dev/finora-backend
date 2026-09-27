@@ -1,14 +1,16 @@
 package com.acadl.reports.report.dto;
 
 import com.acadl.reports.report.model.ReportFormat;
+import com.acadl.reports.report.model.ReportStatus;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
-public record ReportHistoryResponse(
+public record ReportResponse(
         UUID id,
+        ReportStatus status,
         String fileName,
         ReportFormat format,
         LocalDate periodStart,
@@ -17,6 +19,8 @@ public record ReportHistoryResponse(
         BigDecimal totalIncome,
         BigDecimal totalExpense,
         BigDecimal balance,
-        int entryCount,
-        Instant generatedAt
+        Integer entryCount,
+        String failureReason,
+        Instant requestedAt,
+        Instant completedAt
 ) {}

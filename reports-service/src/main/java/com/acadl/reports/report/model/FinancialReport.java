@@ -13,21 +13,33 @@ import java.util.UUID;
 /**
  * Aggregate Root do contexto de Relatórios.
  * <p>
- * Representa um relatório financeiro gerado para um usuário. O que é persistido
- * (na base própria do reports-service) é o histórico: dono, período, totais e saldo.
- * Os lançamentos usados na geração ficam disponíveis apenas em memória, para a
- * exportação do arquivo — não duplicamos as transações do finora.
+ * Na arquitetura orientada a eventos o relatório tem ciclo de vida:
+ * <pre>
+ *   request() ──► REQUESTED ──complete()──► READY
+ *                     │
+ *                     └──────fail()───────► FAILED
+ * </pre>
+ * O pedido é aceito na hora (HTTP 202) e a geração acontece depois, num worker que
+ * consome a fila {@code reports.generate-report}.
  */
 @Entity
-@Table(name = "financial_reports")
+@Table(name = "reports", indexes = {
+        @Index(name = "idx_reports_owner", columnList = "owner_email, requested_at"),
+        @Index(name = "idx_reports_status", columnList = "status, requested_at")
+})
 public class FinancialReport {
 
+    private static final int MAX_REASON_LENGTH = 500;
     private static final DateTimeFormatter FILE_TIMESTAMP =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneId.systemDefault());
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
+
+    /** Controle de concorrência otimista: dois workers não concluem o mesmo relatório. */
+    @Version
+    private Long version;
 
     @Column(name = "owner_email", nullable = false)
     private String ownerEmail;
@@ -42,11 +54,21 @@ public class FinancialReport {
     @Column(nullable = false)
     private ReportFormat format;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private ReportStatus status;
+
     @Column(name = "file_name", nullable = false)
     private String fileName;
 
-    @Column(name = "generated_at", nullable = false, updatable = false)
-    private Instant generatedAt;
+    @Column(name = "failure_reason", length = MAX_REASON_LENGTH)
+    private String failureReason;
+
+    @Column(name = "requested_at", nullable = false, updatable = false)
+    private Instant requestedAt;
+
+    @Column(name = "completed_at")
+    private Instant completedAt;
 
     @Transient
     private List<ReportEntry> entries = List.of();
@@ -55,34 +77,63 @@ public class FinancialReport {
         // exigido pelo JPA
     }
 
-    /**
-     * Fábrica: gera o relatório de um usuário para um período, aplicando as regras:
-     * só entram lançamentos do período, ordenados por data, e o saldo é calculado
-     * pelo serviço de domínio {@link BalanceCalculator}.
-     */
-    public static FinancialReport generate(String ownerEmail, ReportPeriod period, List<ReportEntry> allEntries,
-                                           BalanceCalculator calculator, ReportFormat format) {
+    /** Fábrica: registra o pedido de um relatório (ainda sem conteúdo). */
+    public static FinancialReport request(String ownerEmail, ReportPeriod period, ReportFormat format) {
         if (ownerEmail == null || ownerEmail.isBlank()) {
             throw new ReportGenerationException("Relatório precisa pertencer a um usuário");
         }
-        if (period == null) period = ReportPeriod.allTime();
-        if (format == null) throw new ReportGenerationException("Formato do relatório é obrigatório");
+        if (format == null) {
+            throw new ReportGenerationException("Formato do relatório é obrigatório");
+        }
+        FinancialReport report = new FinancialReport();
+        report.ownerEmail = ownerEmail;
+        report.period = period == null ? ReportPeriod.allTime() : period;
+        report.format = format;
+        report.status = ReportStatus.REQUESTED;
+        report.requestedAt = Instant.now();
+        report.fileName = "relatorio-financeiro-" + FILE_TIMESTAMP.format(report.requestedAt) + "." + format.extension();
+        return report;
+    }
 
-        final ReportPeriod reportPeriod = period;
-        List<ReportEntry> entriesInPeriod = (allEntries == null ? List.<ReportEntry>of() : allEntries).stream()
+    /**
+     * Conclui o relatório: só entram lançamentos do período, ordenados por data, e o
+     * saldo é calculado pelo serviço de domínio {@link BalanceCalculator}.
+     */
+    public void complete(List<ReportEntry> allEntries, BalanceCalculator calculator) {
+        if (status != ReportStatus.REQUESTED) {
+            throw new ReportGenerationException("Relatório " + id + " não está aguardando geração (" + status + ")");
+        }
+        final ReportPeriod reportPeriod = getPeriod();
+        this.entries = (allEntries == null ? List.<ReportEntry>of() : allEntries).stream()
                 .filter(entry -> reportPeriod.contains(entry.date()))
                 .sorted(Comparator.comparing(ReportEntry::date))
                 .toList();
+        this.summary = calculator.calculate(this.entries);
+        this.status = ReportStatus.READY;
+        this.completedAt = Instant.now();
+    }
 
-        FinancialReport report = new FinancialReport();
-        report.ownerEmail = ownerEmail;
-        report.period = reportPeriod;
-        report.summary = calculator.calculate(entriesInPeriod);
-        report.format = format;
-        report.generatedAt = Instant.now();
-        report.fileName = "relatorio-financeiro-" + FILE_TIMESTAMP.format(report.generatedAt) + "." + format.extension();
-        report.entries = entriesInPeriod;
-        return report;
+    /** Marca a falha (com o motivo). Um relatório já com falha não muda mais. */
+    public void fail(String reason) {
+        if (status == ReportStatus.FAILED) {
+            return;
+        }
+        String text = reason == null || reason.isBlank() ? "Falha ao gerar o relatório" : reason;
+        this.failureReason = text.length() > MAX_REASON_LENGTH ? text.substring(0, MAX_REASON_LENGTH) : text;
+        this.status = ReportStatus.FAILED;
+        this.completedAt = Instant.now();
+    }
+
+    public boolean isPending() {
+        return status == ReportStatus.REQUESTED;
+    }
+
+    public boolean isReady() {
+        return status == ReportStatus.READY;
+    }
+
+    public boolean belongsTo(String email) {
+        return ownerEmail != null && ownerEmail.equalsIgnoreCase(email);
     }
 
     public UUID getId() {
@@ -98,6 +149,7 @@ public class FinancialReport {
         return period == null ? ReportPeriod.allTime() : period;
     }
 
+    /** Nulo enquanto o relatório não foi concluído. */
     public ReportSummary getSummary() {
         return summary;
     }
@@ -106,12 +158,24 @@ public class FinancialReport {
         return format;
     }
 
+    public ReportStatus getStatus() {
+        return status;
+    }
+
     public String getFileName() {
         return fileName;
     }
 
-    public Instant getGeneratedAt() {
-        return generatedAt;
+    public String getFailureReason() {
+        return failureReason;
+    }
+
+    public Instant getRequestedAt() {
+        return requestedAt;
+    }
+
+    public Instant getCompletedAt() {
+        return completedAt;
     }
 
     public List<ReportEntry> getEntries() {
