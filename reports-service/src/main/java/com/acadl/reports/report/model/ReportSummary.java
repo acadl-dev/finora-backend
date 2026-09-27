@@ -14,17 +14,18 @@ import java.util.Objects;
 @Embeddable
 public class ReportSummary {
 
-    @Column(name = "total_income", nullable = false, precision = 15, scale = 2)
+    @Column(name = "total_income", precision = 15, scale = 2)
     private BigDecimal totalIncome;
 
-    @Column(name = "total_expense", nullable = false, precision = 15, scale = 2)
+    @Column(name = "total_expense", precision = 15, scale = 2)
     private BigDecimal totalExpense;
 
-    @Column(name = "balance", nullable = false, precision = 15, scale = 2)
+    @Column(name = "balance", precision = 15, scale = 2)
     private BigDecimal balance;
 
-    @Column(name = "entry_count", nullable = false)
-    private int entryCount;
+    // colunas anuláveis: enquanto o relatório está REQUESTED ainda não há resumo
+    @Column(name = "entry_count")
+    private Integer entryCount;
 
     protected ReportSummary() {
         // exigido pelo JPA
@@ -56,7 +57,7 @@ public class ReportSummary {
     }
 
     public int entryCount() {
-        return entryCount;
+        return entryCount == null ? 0 : entryCount;
     }
 
     public boolean isPositive() {

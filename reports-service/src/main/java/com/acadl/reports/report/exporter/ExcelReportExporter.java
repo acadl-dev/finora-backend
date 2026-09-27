@@ -70,7 +70,7 @@ public class ExcelReportExporter implements ReportExporter {
 
         textRow(sheet, 2, "Usuário", report.getOwnerEmail(), styles);
         textRow(sheet, 3, "Período", report.getPeriod().describe(), styles);
-        textRow(sheet, 4, "Gerado em", GENERATED_AT.format(report.getGeneratedAt()), styles);
+        textRow(sheet, 4, "Gerado em", GENERATED_AT.format(report.getCompletedAt() != null ? report.getCompletedAt() : report.getRequestedAt()), styles);
 
         ReportSummary summary = report.getSummary();
         moneyRow(sheet, 6, "Total de receitas", summary.totalIncome(), styles.label, styles.currency);

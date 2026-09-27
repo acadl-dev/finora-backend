@@ -10,7 +10,7 @@
         <module name="gateway-service" />
         <module name="server-service" />
       </profile>
-      <profile name="Annotation profile for finora" enabled="true">
+      <profile name="Annotation profile for reports-service" enabled="true">
         <sourceOutputDir name="target/generated-sources/annotations" />
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />

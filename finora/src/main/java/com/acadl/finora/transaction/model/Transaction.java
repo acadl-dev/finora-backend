@@ -1,15 +1,22 @@
 package com.acadl.finora.transaction.model;
 
 import com.acadl.finora.auth.model.User;
+import com.acadl.finora.shared.domain.DomainEvent;
+import com.acadl.finora.transaction.event.TransactionRegistered;
+import com.acadl.finora.transaction.event.TransactionRemoved;
 import com.acadl.finora.transaction.exception.InvalidTransactionException;
+import com.acadl.finora.transaction.exception.TransactionNotFoundException;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.springframework.data.domain.Persistable;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -19,18 +26,26 @@ import java.util.UUID;
  * Não expõe setters: a única forma de criar uma transação válida é pela fábrica
  * {@link #register}, que garante as regras de negócio (invariantes). Assim, nenhuma
  * transação inconsistente chega ao banco de dados.
+ * <p>
+ * Arquitetura orientada a eventos: cada mudança relevante registra um evento de
+ * domínio ({@link TransactionRegistered}, {@link TransactionRemoved}). O serviço de
+ * aplicação recolhe esses eventos ({@link #pullDomainEvents()}) e os grava na
+ * outbox, na mesma transação do banco.
+ * <p>
+ * O id é gerado pelo próprio domínio (UUID) no momento da criação, para que o evento
+ * já nasça com o id da transação. {@link Persistable} informa ao Spring Data que a
+ * entidade é nova (INSERT direto, sem SELECT antes).
  */
 @Getter
 @Entity
 @Table(name = "transactions")
 @NoArgsConstructor(access = AccessLevel.PROTECTED) // exigido pelo JPA
-public class Transaction {
+public class Transaction implements Persistable<UUID> {
 
     private static final int DESCRIPTION_MAX_LENGTH = 255;
     private static final int CATEGORY_MAX_LENGTH = 100;
 
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
     @Column(nullable = false)
@@ -56,8 +71,17 @@ public class Transaction {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    @Transient
+    @Getter(AccessLevel.NONE)
+    private boolean persisted = false;
+
+    @Transient
+    @Getter(AccessLevel.NONE)
+    private List<DomainEvent> domainEvents = new ArrayList<>();
+
     private Transaction(User user, String description, Money amount,
                         TransactionType type, String category, LocalDate date) {
+        this.id = UUID.randomUUID();
         this.user = user;
         this.description = description;
         this.amount = amount;
@@ -68,9 +92,10 @@ public class Transaction {
     }
 
     /**
-     * Fábrica: registra uma nova receita ou despesa para o usuário informado.
+     * Fábrica: registra uma nova receita ou despesa para o usuário informado e
+     * registra o evento de domínio {@link TransactionRegistered}.
      */
-    public static Transaction register(User owner, String description, Money amount,
+    public static Transaction register(User owner, String ownerEmail, String description, Money amount,
                                        TransactionType type, String category, LocalDate date) {
         if (owner == null) {
             throw new InvalidTransactionException("Transação precisa pertencer a um usuário");
@@ -84,7 +109,7 @@ public class Transaction {
         if (date == null) {
             throw new InvalidTransactionException("Data é obrigatória");
         }
-        return new Transaction(
+        Transaction transaction = new Transaction(
                 owner,
                 normalizeDescription(description),
                 amount,
@@ -92,16 +117,49 @@ public class Transaction {
                 normalizeCategory(category),
                 date
         );
+        transaction.domainEvents.add(TransactionRegistered.of(transaction, ownerEmail));
+        return transaction;
     }
 
-    public static Transaction registerIncome(User owner, String description, Money amount,
+    public static Transaction registerIncome(User owner, String ownerEmail, String description, Money amount,
                                              String category, LocalDate date) {
-        return register(owner, description, amount, TransactionType.INCOME, category, date);
+        return register(owner, ownerEmail, description, amount, TransactionType.INCOME, category, date);
     }
 
-    public static Transaction registerExpense(User owner, String description, Money amount,
+    public static Transaction registerExpense(User owner, String ownerEmail, String description, Money amount,
                                               String category, LocalDate date) {
-        return register(owner, description, amount, TransactionType.EXPENSE, category, date);
+        return register(owner, ownerEmail, description, amount, TransactionType.EXPENSE, category, date);
+    }
+
+    /**
+     * Regra de negócio: só o dono pode excluir a transação. Registra o evento
+     * {@link TransactionRemoved}; a exclusão física fica a cargo do repositório.
+     */
+    public void remove(UUID requesterId, String requesterEmail) {
+        if (!belongsTo(requesterId)) {
+            throw new TransactionNotFoundException(id);
+        }
+        domainEvents.add(TransactionRemoved.of(this, requesterEmail));
+    }
+
+    /** Entrega (e limpa) os eventos de domínio registrados desde a última chamada. */
+    public List<DomainEvent> pullDomainEvents() {
+        List<DomainEvent> events = List.copyOf(domainEvents);
+        domainEvents.clear();
+        return events;
+    }
+
+    // ---- Persistable: id gerado pelo domínio ----
+
+    @Override
+    public boolean isNew() {
+        return !persisted;
+    }
+
+    @PostLoad
+    @PostPersist
+    void markPersisted() {
+        this.persisted = true;
     }
 
     // ---- Comportamentos de domínio ----

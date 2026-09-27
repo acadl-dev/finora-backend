@@ -2,11 +2,12 @@ package com.acadl.reports.report.controller;
 
 import com.acadl.reports.report.exception.InvalidReportPeriodException;
 import com.acadl.reports.report.exception.ReportGenerationException;
-import com.acadl.reports.report.exception.TransactionSourceUnauthorizedException;
-import com.acadl.reports.report.exception.TransactionSourceUnavailableException;
+import com.acadl.reports.report.exception.ReportNotFoundException;
+import com.acadl.reports.report.exception.ReportNotReadyException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -22,21 +23,20 @@ public class ReportExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", ex.getMessage()));
     }
 
-    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
-    public ResponseEntity<Map<String, String>> handleBadParam() {
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class, HttpMessageNotReadableException.class})
+    public ResponseEntity<Map<String, String>> handleBadInput() {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(Map.of("error", "Datas devem estar no formato yyyy-MM-dd"));
+                .body(Map.of("error", "Dados inválidos. Datas devem estar no formato yyyy-MM-dd"));
     }
 
-    @ExceptionHandler(TransactionSourceUnauthorizedException.class)
-    public ResponseEntity<Map<String, String>> handleUnauthorized(TransactionSourceUnauthorizedException ex) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", ex.getMessage()));
+    @ExceptionHandler(ReportNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleNotFound(ReportNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
     }
 
-    @ExceptionHandler(TransactionSourceUnavailableException.class)
-    public ResponseEntity<Map<String, String>> handleUnavailable(TransactionSourceUnavailableException ex) {
-        log.error("Falha ao consultar o finora", ex.getCause());
-        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", ex.getMessage()));
+    @ExceptionHandler(ReportNotReadyException.class)
+    public ResponseEntity<Map<String, String>> handleNotReady(ReportNotReadyException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", ex.getMessage()));
     }
 
     @ExceptionHandler(ReportGenerationException.class)
