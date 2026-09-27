@@ -1,0 +1,6 @@
+# Segredos locais (nunca versionar)
+.env
+**/secrets.env
+deploy/docker/.env
+# Build
+**/target/

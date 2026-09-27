@@ -1,0 +1,7 @@
+# Scripts e wrapper do Maven sempre com fim de linha LF (rodam em Linux no CI e nos containers)
+*.sh    text eol=lf
+mvnw    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
