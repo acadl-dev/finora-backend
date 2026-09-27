@@ -1,0 +1,23 @@
+# Configuração NÃO sensível compartilhada pelos microsserviços (12-factor: config no ambiente).
+# Segredos (senhas, JWT) ficam no Secret "finora-secrets", gerado pelo overlay.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: finora-config
+data:
+  # Service discovery: cada pod se registra no Eureka pelo próprio IP
+  EUREKA_URL: "http://server-service:8761/eureka/"
+  EUREKA_PREFER_IP: "true"
+  # Mensageria
+  RABBITMQ_HOST: "rabbitmq"
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_USER: "finora"
+  # Observabilidade: traces -> Tempo, logs -> Loki (profile "loki")
+  OTLP_TRACING_ENDPOINT: "http://tempo:4318/v1/traces"
+  TRACING_SAMPLING_PROBABILITY: "1.0"
+  LOKI_URL: "http://loki:3100"
+  SPRING_PROFILES_ACTIVE: "loki"
+  # Produção: sem SQL no log
+  JPA_SHOW_SQL: "false"
+  # JVM ciente dos limites do container
+  JAVA_OPTS: "-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError"

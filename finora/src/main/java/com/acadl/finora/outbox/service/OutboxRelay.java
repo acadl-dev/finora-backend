@@ -2,6 +2,7 @@ package com.acadl.finora.outbox.service;
 
 import com.acadl.finora.outbox.model.OutboxEvent;
 import com.acadl.finora.outbox.repository.OutboxEventRepository;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.AmqpException;
@@ -39,6 +40,8 @@ public class OutboxRelay {
 
     private final OutboxEventRepository outboxEventRepository;
     private final RabbitTemplate rabbitTemplate;
+    private final OutboxTracing outboxTracing;
+    private final MeterRegistry meterRegistry;
 
     @Value("${finora.outbox.confirm-timeout-ms:5000}")
     private long confirmTimeoutMs;
@@ -49,13 +52,17 @@ public class OutboxRelay {
 
         for (OutboxEvent event : pending) {
             try {
-                publish(event);
+                // publica "dentro" do trace da requisição que gerou o evento
+                outboxTracing.runWithin(event.getTraceHeaders(), "outbox publish " + event.getEventType(),
+                        () -> publish(event));
                 event.markPublished(Instant.now());
+                meterRegistry.counter("finora.outbox.published", "event", event.getEventType()).increment();
                 outboxEventRepository.save(event);
                 log.debug("Evento {} ({}) publicado em {}", event.getId(), event.getEventType(), event.getRoutingKey());
             } catch (Exception e) {
                 event.registerFailure(e.getMessage());
                 outboxEventRepository.save(event);
+                meterRegistry.counter("finora.outbox.publish.failures", "event", event.getEventType()).increment();
                 if (event.getAttempts() == 1 || event.getAttempts() % 30 == 0) {
                     log.warn("Falha ao publicar o evento {} (tentativa {}): {}. Nova tentativa em instantes.",
                             event.getId(), event.getAttempts(), e.getMessage());

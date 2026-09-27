@@ -1,0 +1,164 @@
+# ============================================================================
+# Finora — pilha COMPLETA em containers (produção simulada com Docker Compose)
+#
+#   cd back_finora/deploy/docker
+#   cp .env.example .env        # ajuste JWT_SECRET
+#   docker compose up -d --build
+#
+# Front: http://localhost:3000 | Gateway: http://localhost:8080 | Grafana: http://localhost:3001
+# Eureka: http://localhost:8761 | RabbitMQ: http://localhost:15672 | Prometheus: http://localhost:9090
+#
+# É a alternativa "só Docker" ao Kubernetes (deploy/k8s). Pare o ambiente de
+# desenvolvimento antes (as portas são as mesmas).
+# ============================================================================
+name: finora-prod
+
+x-app-env: &app-env
+  EUREKA_URL: http://server-service:8761/eureka/
+  EUREKA_PREFER_IP: "true"
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_USER: finora
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-finora}
+  JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env}
+  OTLP_TRACING_ENDPOINT: http://tempo:4318/v1/traces
+  TRACING_SAMPLING_PROBABILITY: "1.0"
+  LOKI_URL: http://loki:3100
+  SPRING_PROFILES_ACTIVE: loki
+  JPA_SHOW_SQL: "false"
+  JAVA_OPTS: -XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError
+
+services:
+  # ---------------------------------------------------------------- dados
+  postgres-finora:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: finora
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes: [pg_finora:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d finora"]
+      interval: 5s
+      retries: 10
+
+  postgres-reports:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: finora_reports
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes: [pg_reports:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d finora_reports"]
+      interval: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    environment:
+      RABBITMQ_DEFAULT_USER: finora
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-finora}
+    ports: ["15672:15672"]
+    volumes: [rabbitmq:/var/lib/rabbitmq]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      retries: 10
+
+  # ---------------------------------------------------------------- microsserviços
+  server-service:
+    build: ../../server-service
+    image: ghcr.io/acadl-dev/server-service:local
+    ports: ["8761:8761"]
+    environment:
+      JAVA_OPTS: -XX:MaxRAMPercentage=75
+      OTLP_TRACING_ENDPOINT: http://tempo:4318/v1/traces
+      TRACING_SAMPLING_PROBABILITY: "1.0"
+      LOKI_URL: http://loki:3100
+      SPRING_PROFILES_ACTIVE: loki
+
+  finora:
+    build: ../../finora
+    image: ghcr.io/acadl-dev/finora:local
+    environment:
+      <<: *app-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-finora:5432/finora
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    depends_on:
+      postgres-finora: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      server-service: { condition: service_healthy }
+
+  reports-service:
+    build: ../../reports-service
+    image: ghcr.io/acadl-dev/reports-service:local
+    environment:
+      <<: *app-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-reports:5432/finora_reports
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    depends_on:
+      postgres-reports: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      server-service: { condition: service_healthy }
+
+  gateway-service:
+    build: ../../gateway-service
+    image: ghcr.io/acadl-dev/gateway-service:local
+    ports: ["8080:8080"]
+    environment:
+      <<: *app-env
+    depends_on:
+      server-service: { condition: service_healthy }
+
+  frontend:
+    build: ${FRONTEND_CONTEXT:-../../../front_finora/finora}
+    image: ghcr.io/acadl-dev/finora-frontend:local
+    ports: ["3000:3000"]
+    environment:
+      API_BASE_URL: http://gateway-service:8080
+    depends_on:
+      gateway-service: { condition: service_healthy }
+
+  # ---------------------------------------------------------------- observabilidade
+  loki:
+    image: grafana/loki:3.4.2
+    user: "0"
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ../k8s/observability/config/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki:/loki
+
+  tempo:
+    image: grafana/tempo:2.7.2
+    user: "0"
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ../k8s/observability/config/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo:/var/tempo
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    ports: ["9090:9090"]
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    ports: ["3001:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/finora-overview.json
+    volumes:
+      - ../k8s/observability/config/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - ../k8s/observability/config/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
+      - ../k8s/observability/config/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus, loki, tempo]
+
+volumes:
+  pg_finora:
+  pg_reports:
+  rabbitmq:
+  loki:
+  tempo:

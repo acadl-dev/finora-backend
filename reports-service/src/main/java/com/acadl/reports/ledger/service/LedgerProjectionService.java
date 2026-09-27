@@ -6,6 +6,7 @@ import com.acadl.reports.ledger.model.LedgerEntry;
 import com.acadl.reports.ledger.model.ProcessedEvent;
 import com.acadl.reports.ledger.repository.LedgerEntryRepository;
 import com.acadl.reports.ledger.repository.ProcessedEventRepository;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,7 @@ public class LedgerProjectionService {
 
     private final LedgerEntryRepository ledgerEntryRepository;
     private final ProcessedEventRepository processedEventRepository;
+    private final MeterRegistry meterRegistry;
 
     @Transactional
     public void apply(TransactionEventMessage event) {
@@ -33,7 +35,8 @@ public class LedgerProjectionService {
             throw new IllegalArgumentException("Evento sem eventId/eventType");
         }
         if (processedEventRepository.existsById(event.eventId())) {
-            log.debug("Evento {} já processado; ignorado (idempotência)", event.eventId());
+            log.info("Evento {} já processado; ignorado (idempotência)", event.eventId());
+            meterRegistry.counter("finora.ledger.events.duplicated").increment();
             return;
         }
 
@@ -44,6 +47,7 @@ public class LedgerProjectionService {
         }
 
         processedEventRepository.save(new ProcessedEvent(event.eventId(), event.eventType(), Instant.now()));
+        meterRegistry.counter("finora.ledger.events.applied", "type", event.eventType()).increment();
     }
 
     private void onRegistered(TransactionEventMessage event) {

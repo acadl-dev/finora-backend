@@ -1,0 +1,13 @@
+# Mantém dependências atualizadas: abre PRs semanais (que passam pelo CI antes do merge).
+version: 2
+updates:
+  - package-ecosystem: maven
+    directories: ["/finora", "/reports-service", "/gateway-service", "/server-service"]
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+  - package-ecosystem: docker
+    directories: ["/finora", "/reports-service", "/gateway-service", "/server-service"]
+    schedule: { interval: weekly }
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule: { interval: weekly }

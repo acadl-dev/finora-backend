@@ -1,5 +1,6 @@
 server:
   port: 8761
+  shutdown: graceful   # termina as requisições em andamento antes de parar (rolling update)
 
 spring:
   application:
@@ -18,3 +19,34 @@ eureka:
     # em desenvolvimento, remove rapidamente instâncias que caíram
     enable-self-preservation: false
     eviction-interval-timer-in-ms: 10000
+
+# ===== Operação em produção (TP5): health checks, métricas e rastreamento =====
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true            # /actuator/health/liveness e /readiness (Kubernetes)
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}   # rótulo usado nos painéis do Grafana
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true               # permite calcular p95/p99 no Prometheus
+  tracing:
+    sampling:
+      # 1.0 = 100% das requisições rastreadas (ConfigMap do Kubernetes / compose de produção).
+      # Padrão 0.0 no desenvolvimento local: sem Tempo rodando, não há para onde exportar.
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.0}
+  otlp:
+    tracing:
+      endpoint: ${OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces}   # Grafana Tempo
+
+# Destino dos logs quando o profile "loki" está ativo (ver logback-spring.xml)
+logging:
+  loki:
+    url: ${LOKI_URL:http://localhost:3100}

@@ -1,0 +1,232 @@
+# ============================================================================
+# CI/CD do backend Finora
+#
+#  CI (todo push e pull request):
+#    1. test       -> testes unitários + integração (Testcontainers) + cobertura, por microsserviço
+#    2. manifests  -> valida os manifests do Kubernetes (kustomize + kubeconform) e o compose
+#  CD (push na main, tag v* ou execução manual):
+#    3. images     -> constrói e publica as imagens Docker no GitHub Container Registry (GHCR)
+#    4. deploy     -> implanta num cluster Kubernetes efêmero (kind) e roda o smoke test ponta a ponta
+# ============================================================================
+name: CI/CD backend
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  # nome das imagens nos manifests (deploy/k8s): ghcr.io/acadl-dev/<serviço>
+  IMAGE_PREFIX: ghcr.io/acadl-dev
+
+jobs:
+  # --------------------------------------------------------------------------
+  test:
+    name: Testes — ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [server-service, gateway-service, finora, reports-service]
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: ${{ matrix.service }}/pom.xml
+
+      - name: Unitários + integração (PostgreSQL e RabbitMQ via Testcontainers) + cobertura
+        run: |
+          chmod +x mvnw
+          ./mvnw -B -ntp verify
+
+      - name: Resumo dos testes e da cobertura
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import csv, glob, os, xml.etree.ElementTree as ET
+          svc = os.environ["SVC"]
+          total = failures = errors = skipped = 0
+          for f in glob.glob("target/surefire-reports/*.xml") + glob.glob("target/failsafe-reports/TEST-*.xml"):
+              r = ET.parse(f).getroot()
+              total += int(r.get("tests", 0)); failures += int(r.get("failures", 0))
+              errors += int(r.get("errors", 0)); skipped += int(r.get("skipped", 0))
+          line = f"### {svc}\n- Testes: **{total}** (falhas: {failures}, erros: {errors}, ignorados: {skipped})\n"
+          if os.path.exists("target/site/jacoco/jacoco.csv"):
+              missed = covered = 0
+              for row in csv.DictReader(open("target/site/jacoco/jacoco.csv")):
+                  missed += int(row["LINE_MISSED"]); covered += int(row["LINE_COVERED"])
+              if missed + covered:
+                  line += f"- Cobertura de linhas: **{100 * covered / (missed + covered):.1f}%**\n"
+          print(line)
+          PY
+        env:
+          SVC: ${{ matrix.service }}
+
+      - name: Guardar relatórios de teste e cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ matrix.service }}
+          path: |
+            ${{ matrix.service }}/target/surefire-reports
+            ${{ matrix.service }}/target/failsafe-reports
+            ${{ matrix.service }}/target/site/jacoco
+          if-no-files-found: ignore
+
+  # --------------------------------------------------------------------------
+  manifests:
+    name: Valida Kubernetes e Docker Compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Renderizar e validar os overlays (local e ci)
+        run: |
+          for overlay in local ci; do
+            cp deploy/k8s/overlays/local/secrets.env.example deploy/k8s/overlays/$overlay/secrets.env
+            kubectl kustomize deploy/k8s/overlays/$overlay > /tmp/$overlay.yaml
+            echo "overlay $overlay: $(grep -c '^kind:' /tmp/$overlay.yaml) recursos"
+            kubeconform -strict -summary -ignore-missing-schemas /tmp/$overlay.yaml
+          done
+
+      - name: Validar o docker-compose de produção simulada
+        working-directory: deploy/docker
+        run: |
+          cp .env.example .env
+          docker compose config --quiet && echo "docker-compose.yml válido"
+
+  # --------------------------------------------------------------------------
+  images:
+    name: Imagem — ${{ matrix.service }}
+    needs: [test, manifests]
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [server-service, gateway-service, finora, reports-service]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags da imagem (versionamento)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build e push para o GHCR
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  # --------------------------------------------------------------------------
+  deploy:
+    name: CD — deploy no Kubernetes (kind) + smoke test
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SERVICES: server-service gateway-service finora reports-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag desta versão
+        run: echo "TAG=sha-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Criar cluster Kubernetes efêmero (kind)
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: finora
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Baixar as imagens publicadas e carregar no cluster
+        run: |
+          for svc in $SERVICES; do
+            docker pull "$IMAGE_PREFIX/$svc:$TAG"
+            kind load docker-image "$IMAGE_PREFIX/$svc:$TAG" --name finora
+          done
+
+      - name: Preparar o overlay de CD (tags das imagens e segredos gerados)
+        working-directory: deploy/k8s/overlays/ci
+        run: |
+          {
+            echo "JWT_SECRET=$(openssl rand -base64 64 | tr -d '\n')"
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
+            echo "RABBITMQ_PASSWORD=$(openssl rand -hex 16)"
+            echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -hex 16)"
+          } > secrets.env
+          for svc in $SERVICES; do
+            kustomize edit set image "ghcr.io/acadl-dev/$svc=$IMAGE_PREFIX/$svc:$TAG"
+          done
+          cat kustomization.yaml
+
+      - name: Implantar
+        run: |
+          kubectl apply -k deploy/k8s/overlays/ci
+          kubectl -n finora rollout status statefulset/postgres-finora --timeout=300s
+          kubectl -n finora rollout status statefulset/postgres-reports --timeout=300s
+          kubectl -n finora rollout status statefulset/rabbitmq --timeout=300s
+          for d in server-service finora reports-service gateway-service; do
+            kubectl -n finora rollout status deployment/$d --timeout=420s
+          done
+          kubectl -n finora get pods -o wide
+
+      - name: Smoke test ponta a ponta (via gateway)
+        run: |
+          kubectl -n finora port-forward svc/gateway-service 8080:8080 > /tmp/port-forward.log 2>&1 &
+          sleep 5
+          BASE_URL=http://localhost:8080 bash deploy/scripts/smoke-test.sh
+
+      - name: Diagnóstico em caso de falha
+        if: failure()
+        run: |
+          kubectl -n finora get all
+          kubectl -n finora get events --sort-by=.lastTimestamp | tail -40
+          for d in server-service finora reports-service gateway-service; do
+            echo "===== logs $d"; kubectl -n finora logs deployment/$d --tail=150 || true
+          done

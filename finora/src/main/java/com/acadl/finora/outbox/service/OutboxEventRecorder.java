@@ -26,11 +26,14 @@ public class OutboxEventRecorder {
 
     private final OutboxEventRepository outboxEventRepository;
     private final ObjectMapper objectMapper;
+    private final OutboxTracing outboxTracing;
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void record(List<? extends DomainEvent> events) {
+        // contexto de rastreamento da requisição atual (null em processos sem trace, ex.: backfill)
+        String traceHeaders = outboxTracing.captureCurrentContext();
         for (DomainEvent event : events) {
-            outboxEventRepository.save(OutboxEvent.pending(
+            OutboxEvent outboxEvent = OutboxEvent.pending(
                     event.eventId(),
                     event.aggregateType(),
                     event.aggregateId(),
@@ -39,7 +42,9 @@ public class OutboxEventRecorder {
                     event.routingKey(),
                     toJson(event),
                     event.occurredAt()
-            ));
+            );
+            outboxEvent.attachTraceHeaders(traceHeaders);
+            outboxEventRepository.save(outboxEvent);
         }
     }
 

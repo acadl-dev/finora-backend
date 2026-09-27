@@ -1,0 +1,11 @@
+# Nada disso entra na imagem
+target/
+.idea/
+*.iml
+.mvn/wrapper/maven-wrapper.jar
+# segredos NUNCA entram na imagem: são injetados em tempo de execução (Secret do Kubernetes)
+.env
+.env.*
+docker-compose.yml
+Dockerfile
+.dockerignore

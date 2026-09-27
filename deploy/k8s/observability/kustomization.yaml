@@ -1,0 +1,33 @@
+# Observabilidade do Finora: logs (Loki), traces (Tempo), métricas (Prometheus) e painéis (Grafana).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: finora
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: finora
+      app.kubernetes.io/component: observability
+    includeSelectors: false
+resources:
+  - loki.yaml
+  - tempo.yaml
+  - prometheus.yaml
+  - grafana.yaml
+configMapGenerator:
+  - name: loki-config
+    files:
+      - loki.yaml=config/loki.yaml
+  - name: tempo-config
+    files:
+      - tempo.yaml=config/tempo.yaml
+  - name: prometheus-config
+    files:
+      - prometheus.yml=config/prometheus.yml
+  - name: grafana-datasources
+    files:
+      - datasources.yaml=config/grafana-datasources.yaml
+  - name: grafana-dashboard-provider
+    files:
+      - dashboards.yaml=config/grafana-dashboards.yaml
+  - name: grafana-dashboards
+    files:
+      - finora-overview.json=config/dashboards/finora-overview.json
