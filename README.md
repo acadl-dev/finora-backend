@@ -1,78 +1,91 @@
-# Finora — Back-end (microsserviços orientados a eventos)
+# Finora — Backend
 
-| Serviço | Porta | Papel |
-|---|---|---|
-| `server-service` | 8761 | **Service Discovery** (Spring Cloud Netflix Eureka Server). Painel: http://localhost:8761 |
-| `gateway-service` | 8080 | **API Gateway** (Spring Cloud Gateway). Porta única usada pelo front-end |
-| `finora` | 8082 | Contexto de **Identidade e Transações**. Postgres `finora` (5433). **Produtor** de eventos (Transactional Outbox) |
-| `reports-service` | 8083 | Contexto de **Relatórios**. Postgres **próprio** `finora_reports` (5434). **Consumidor** de eventos + worker de relatórios |
-| RabbitMQ | 5672 / 15672 | **Message broker**. Painel: http://localhost:15672 (usuário `finora`, senha `finora`) |
+[![CI/CD backend](https://github.com/acadl-dev/finora-backend/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/acadl-dev/finora-backend/actions/workflows/ci-cd.yml)
+
+Sistema de controle financeiro pessoal (Projeto de Bloco — Engenharia de Softwares Escaláveis):
+microsserviços Spring Boot com Domain-Driven Design, arquitetura orientada a eventos (RabbitMQ),
+conteinerizados com Docker, orquestrados no Kubernetes, monitorados com Grafana/Loki/Tempo/Prometheus
+e entregues por CI/CD no GitHub Actions. O front-end está em
+[finora-frontend](https://github.com/acadl-dev/finora-frontend).
 
 ## Arquitetura
 
+| Serviço | Porta | Papel |
+|---|---|---|
+| `server-service` | 8761 | **Service Discovery** (Spring Cloud Netflix Eureka) |
+| `gateway-service` | 8080 | **API Gateway** (Spring Cloud Gateway) — porta única do front |
+| `finora` | 8082 | Contexto de **Identidade e Transações**. PostgreSQL próprio. **Produtor** de eventos (Transactional Outbox) |
+| `reports-service` | 8083 | Contexto de **Relatórios**. PostgreSQL próprio. **Consumidor** de eventos + workers de relatório |
+| RabbitMQ | 5672 / 15672 | Message broker |
+| Loki · Tempo · Prometheus · Grafana | — / — / 9090 / 3001 | Logs · traces · métricas · painéis |
+
 ```
-                         ┌──────────────── server-service (Eureka) ◄── todos se registram
-                         │
-Front (Next.js) ──► gateway-service :8080 ──┬─► /auth/**, /transactions/** ─► finora ──┐
-                                            └─► /reports/**                 ─► reports-service
-                                                                                 ▲      │
-   finora: salva transação + evento na outbox (mesma transação do banco)        │      │
-   OutboxRelay ──TransactionRegistered / TransactionRemoved──► RabbitMQ ─────────┘      │
-                         exchange finora.transactions (topic)                           │
-                                                                                        │
-   POST /reports ──GenerateReportCommand──► RabbitMQ (finora.reports.commands) ──► worker (2 a 4 consumidores)
+Front (Next.js) ──► gateway-service ──┬─► /auth/**, /transactions/** ─► finora ──► PostgreSQL
+                          │           └─► /reports/**                 ─► reports-service ──► PostgreSQL
+                          ▼                                                   ▲
+                  server-service (Eureka)            finora ── eventos ──► RabbitMQ
+                                                    (outbox)   comandos de relatório (workers)
+
+Todos ──► logs: Loki · traces: Tempo · métricas: Prometheus ──► Grafana
 ```
 
-Não há mais chamada HTTP entre microsserviços: o reports-service mantém uma **projeção** das transações
-(tabela `ledger_entries`) alimentada pelos eventos e gera os relatórios a partir dela.
+Stack: Java 21, Spring Boot 3.5, Spring Cloud 2025.0, Spring AMQP, PostgreSQL 13, RabbitMQ 4,
+Micrometer + OpenTelemetry, Docker, Kubernetes (Kustomize), GitHub Actions.
 
-### Topologia RabbitMQ
+## Documentação
 
-| Exchange (tipo) | Routing key | Fila | Consumidor | Padrão |
+| Documento | Conteúdo |
+|---|---|
+| [docs/implantacao.md](docs/implantacao.md) | Docker, Kubernetes (Docker Desktop), escalabilidade, rolling update, rollback, problemas comuns |
+| [docs/monitoramento.md](docs/monitoramento.md) | Agregação de logs, rastreamento de transações, métricas, painel e health checks |
+| [docs/ci-cd.md](docs/ci-cd.md) | Pipelines do GitHub Actions, versionamento das imagens, deploy automatizado |
+| [docs/testes.md](docs/testes.md) | Estratégia e casos de teste (unitários, integração, componente, E2E, carga) |
+| [docs/versionamento.md](docs/versionamento.md) | Branches, commits, tags e fluxo de pull request |
+| [CHANGELOG.md](CHANGELOG.md) | Mudanças por versão |
+
+## Início rápido — produção simulada no Kubernetes
+
+Pré-requisito: Docker Desktop com Kubernetes ativado. Detalhes em [docs/implantacao.md](docs/implantacao.md).
+
+```powershell
+.\deploy\scripts\build-images.ps1
+Copy-Item deploy\k8s\overlays\local\secrets.env.example deploy\k8s\overlays\local\secrets.env   # ajuste JWT_SECRET
+kubectl apply -k deploy\k8s\overlays\local
+kubectl get pods -n finora -w
+```
+
+| Aplicação | Grafana | Eureka | RabbitMQ | Prometheus |
 |---|---|---|---|---|
-| `finora.transactions` (topic) | `transaction.registered`, `transaction.removed` → binding `transaction.#` | `reports.transaction-events` | `TransactionEventsListener` (1 consumidor, preserva ordem) | Evento (publish/subscribe) |
-| `finora.reports.commands` (direct) | `report.generate` | `reports.generate-report` | `GenerateReportCommandListener` (2 a 4 consumidores) | Comando (fila de trabalho) |
-| `finora.dlx` (direct) | nome da DLQ | `reports.transaction-events.dlq`, `reports.generate-report.dlq` | DLQ de relatórios marca o relatório como FAILED | Dead Letter Channel |
+| http://localhost:3000 | http://localhost:3001 | http://localhost:8761 | http://localhost:15672 | http://localhost:9090 |
 
-Falha no consumo → 3 tentativas com backoff exponencial (1 s, 2 s, 4 s) → DLQ.
+Sem Kubernetes: `cd deploy/docker && cp .env.example .env && docker compose up -d --build`.
 
-## Como executar (nesta ordem)
+## Desenvolvimento local (IntelliJ)
 
-1. Infraestrutura (Docker):
-   ```bash
-   docker compose up -d                 # RabbitMQ (nesta pasta, back_finora)
-   cd finora && docker compose up -d    # Postgres do finora (5433)
-   cd ../reports-service && docker compose up -d   # Postgres do reports-service (5434)
-   ```
-2. `server-service` (Eureka) → `./mvnw spring-boot:run`
-3. `reports-service` → `./mvnw spring-boot:run` (declara filas e bindings no RabbitMQ)
-4. `finora` → `./mvnw spring-boot:run` (publica os eventos pendentes da outbox, inclusive das transações antigas)
-5. `gateway-service` → `./mvnw spring-boot:run`
-6. Front-end: `front_finora/finora` → `npm run dev` (`API_BASE_URL=http://localhost:8080`, o gateway)
+1. Infraestrutura: `docker compose up -d` (RabbitMQ, nesta pasta), depois `docker compose up -d`
+   em `finora/` (PostgreSQL 5433) e em `reports-service/` (PostgreSQL 5434).
+2. Serviços, nesta ordem: `server-service` → `reports-service` → `finora` → `gateway-service`
+   (`./mvnw spring-boot:run` ou pelo IntelliJ). Cada serviço lê o `JWT_SECRET` do seu `.env`.
+3. Front: `front_finora/finora` → `npm run dev` (`API_BASE_URL=http://localhost:8080`).
 
-> A ordem 3 → 4 é a recomendada, mas não obrigatória: se o finora subir antes, os eventos ficam na
-> outbox (mensagem sem fila de destino não é marcada como publicada) e são enviados assim que o reports-service criar a fila.
-
-Confira:
-- http://localhost:8761 — `FINORA`, `REPORTS-SERVICE` e `GATEWAY-SERVICE` como UP (~30 s).
-- http://localhost:15672 → *Queues* — `reports.transaction-events`, `reports.generate-report` e as DLQs.
+Para ver logs e traces também no desenvolvimento, suba a observabilidade do compose de produção
+(`docker compose -f deploy/docker/docker-compose.yml up -d loki tempo prometheus grafana`) e rode os
+serviços com o profile `loki` e a variável `TRACING_SAMPLING_PROBABILITY=1.0`.
 
 ## Endpoints (via gateway)
 
 | Método | Rota | Descrição |
 |---|---|---|
-| POST | `/transactions` | Cria receita/despesa. Grava a transação e o evento `TransactionRegistered` na outbox |
-| GET | `/transactions` | Lista as transações do usuário |
-| DELETE | `/transactions/{id}` | Exclui a transação (só o dono). Grava `TransactionRemoved` na outbox |
-| POST | `/reports` | Body `{ "start": "yyyy-MM-dd", "end": "yyyy-MM-dd" }` (opcionais). **202 Accepted**: relatório `REQUESTED` |
-| GET | `/reports/{id}` | Status do relatório: `REQUESTED`, `READY` ou `FAILED` |
-| GET | `/reports/{id}/file` | Baixa o Excel (409 se ainda não está pronto) |
-| GET | `/reports/history` | Últimos 20 relatórios do usuário, com status e saldo |
+| POST | `/auth/register`, `/auth/login` | Cadastro e login (JWT) |
+| POST · GET · DELETE | `/transactions`, `/transactions/{id}` | Receitas e despesas (eventos na outbox) |
+| POST | `/reports` | Pede o relatório Excel (202 Accepted, geração assíncrona) |
+| GET | `/reports/{id}`, `/reports/{id}/file`, `/reports/history` | Status, download e histórico |
+| GET | `/actuator/health`, `/actuator/prometheus` (em cada serviço) | Health checks e métricas |
 
-Todos exigem `Authorization: Bearer <token>`.
+## Testes
 
-## Mudanças de banco
+```powershell
+cd finora; .\mvnw verify          # unitários + integração (Testcontainers: precisa do Docker)
+```
 
-- `finora`: nova tabela `outbox_events` (criada pelo Hibernate, `ddl-auto: update`).
-- `reports-service`: novas tabelas `ledger_entries`, `processed_events`, `reports` e `report_contents`.
-  A tabela antiga `financial_reports` (etapa anterior) não é mais usada e pode ser apagada.
+Resumo por camada em [docs/testes.md](docs/testes.md). O CI roda tudo a cada push.
