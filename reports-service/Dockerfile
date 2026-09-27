@@ -5,7 +5,7 @@
 #   2) runtime: só o JRE 21 + o .jar, rodando com usuário sem privilégios
 # Os testes NÃO rodam aqui: rodam no pipeline de CI antes do build da imagem.
 # ---------------------------------------------------------------------------
-FROM maven:3.9-eclipse-temurin-21 AS build
+FROM maven:3-eclipse-temurin-24 AS build
 WORKDIR /workspace
 
 # 1) só o pom: baixa as dependências (camada reaproveitada enquanto o pom não mudar)
