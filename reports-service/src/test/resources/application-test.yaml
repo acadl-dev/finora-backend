@@ -1,0 +1,22 @@
+# Configuração dos testes automatizados (profile "test").
+# PostgreSQL e RabbitMQ vêm dos containers do Testcontainers (@ServiceConnection).
+jwt:
+  secret: D0gZDHNdw2SORSS75D32quScVtXpLeOxt0LeKmGLTsszgol0Si3wmp88SzzzojBRVNoJVuqnrquvYG7yobdMCA==
+
+eureka:
+  client:
+    enabled: false
+
+management:
+  tracing:
+    enabled: false
+
+spring:
+  jpa:
+    show-sql: false
+  rabbitmq:
+    listener:
+      simple:
+        retry:
+          initial-interval: 100ms   # retries rápidos para o teste da DLQ
+          max-interval: 500ms

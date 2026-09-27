@@ -1,0 +1,20 @@
+# Configuração dos testes automatizados (profile "test").
+# PostgreSQL e RabbitMQ vêm dos containers do Testcontainers (@ServiceConnection).
+jwt:
+  secret: D0gZDHNdw2SORSS75D32quScVtXpLeOxt0LeKmGLTsszgol0Si3wmp88SzzzojBRVNoJVuqnrquvYG7yobdMCA==
+
+eureka:
+  client:
+    enabled: false        # nos testes não há Eureka
+
+management:
+  tracing:
+    enabled: false        # nem Tempo
+
+spring:
+  jpa:
+    show-sql: false
+
+finora:
+  outbox:
+    relay-interval-ms: 200   # relay mais rápido para os testes não esperarem
