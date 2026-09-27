@@ -27,6 +27,8 @@ public class WebSecurityConfig {
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(request -> request
+                        // health checks do Kubernetes e métricas do Prometheus
+                        .requestMatchers("/actuator/**").permitAll()
                         .anyRequest().authenticated())
                 // sem token válido -> 401 (em vez do 403 padrão)
                 .exceptionHandling(ex -> ex

@@ -4,6 +4,7 @@ import com.acadl.reports.report.exception.ReportGenerationException;
 import com.acadl.reports.report.model.*;
 import com.acadl.reports.report.repository.FinancialReportRepository;
 import com.acadl.reports.report.repository.ReportContentRepository;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -28,6 +29,7 @@ public class ReportGenerationService {
     private final TransactionSource transactionSource;
     private final BalanceCalculator balanceCalculator;
     private final ReportExporter reportExporter;
+    private final MeterRegistry meterRegistry;
 
     @Transactional
     public void generate(UUID reportId) {
@@ -47,10 +49,12 @@ public class ReportGenerationService {
             ReportFile file = reportExporter.export(report);
             contentRepository.save(ReportContent.of(report.getId(), file));
             log.info("Relatório {} gerado: {} lançamento(s)", reportId, report.getSummary().entryCount());
+            meterRegistry.counter("finora.reports.completed", "status", "READY").increment();
         } catch (ReportGenerationException e) {
             // erro de negócio: tentar de novo não resolve -> falha definitiva
             log.warn("Relatório {} falhou: {}", reportId, e.getMessage());
             report.fail(e.getMessage());
+            meterRegistry.counter("finora.reports.completed", "status", "FAILED").increment();
         }
     }
 

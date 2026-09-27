@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logs do Finora.
+  - Sempre: console (visto com "kubectl logs" / "docker logs"), já com traceId e spanId.
+  - Profile "loki": também envia cada linha para o Grafana Loki (agregação de logs).
+    Rótulos no Loki: app (nome do serviço), host (pod/container) e level.
+    O traceId no texto permite saltar do log para o trace no Grafana Tempo.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="finora"/>
+    <springProperty scope="context" name="lokiUrl" source="logging.loki.url" defaultValue="http://localhost:3100"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <springProfile name="loki">
+        <appender name="LOKI" class="com.github.loki4j.logback.Loki4jAppender">
+            <http>
+                <url>${lokiUrl}/loki/api/v1/push</url>
+            </http>
+            <format>
+                <label>
+                    <pattern>app=${appName},host=${HOSTNAME},level=%level</pattern>
+                </label>
+                <message>
+                    <pattern>%d{ISO8601} %-5level [%thread] %logger{36} traceId=%X{traceId:-} spanId=%X{spanId:-} - %msg%n%ex</pattern>
+                </message>
+            </format>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="LOKI"/>
+        </root>
+    </springProfile>
+</configuration>

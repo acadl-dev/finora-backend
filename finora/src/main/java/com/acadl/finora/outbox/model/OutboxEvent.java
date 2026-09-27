@@ -61,6 +61,14 @@ public class OutboxEvent implements Persistable<UUID> {
     @Column(name = "last_error", length = MAX_ERROR_LENGTH)
     private String lastError;
 
+    /**
+     * Contexto de rastreamento (headers W3C "traceparent") da requisição que gerou o
+     * evento. O relay publica "dentro" desse trace, então no Grafana Tempo a requisição
+     * HTTP, a publicação e o consumo no reports-service aparecem como UMA transação.
+     */
+    @Column(name = "trace_headers", length = 1000)
+    private String traceHeaders;
+
     @Transient
     @Getter(AccessLevel.NONE)
     private boolean persisted = false;
@@ -78,6 +86,10 @@ public class OutboxEvent implements Persistable<UUID> {
         event.occurredAt = occurredAt;
         event.attempts = 0;
         return event;
+    }
+
+    public void attachTraceHeaders(String traceHeaders) {
+        this.traceHeaders = traceHeaders;
     }
 
     public boolean isPublished() {

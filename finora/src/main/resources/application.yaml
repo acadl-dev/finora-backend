@@ -20,7 +20,7 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
-    show-sql: true
+    show-sql: ${JPA_SHOW_SQL:true}
 
   # RabbitMQ (docker-compose.yml na raiz de back_finora)
   rabbitmq:
@@ -34,9 +34,11 @@ spring:
     publisher-returns: true
     template:
       mandatory: true
+      observation-enabled: true   # propaga o traceId nos headers da mensagem
 
 server:
   port: 8082
+  shutdown: graceful   # termina as requisições em andamento antes de parar (rolling update)
 
 eureka:
   client:
@@ -45,6 +47,10 @@ eureka:
   instance:
     # ambiente local: todos os serviços rodam na mesma máquina
     hostname: ${EUREKA_INSTANCE_HOSTNAME:localhost}
+    # no Kubernetes cada pod se registra pelo próprio IP (EUREKA_PREFER_IP=true)
+    prefer-ip-address: ${EUREKA_PREFER_IP:false}
+    lease-renewal-interval-in-seconds: 10
+    lease-expiration-duration-in-seconds: 30
 
 # Segredo usado para assinar/validar o JWT (JwtService usa ${jwt.secret})
 jwt:
@@ -56,3 +62,39 @@ finora:
     relay-interval-ms: 1000      # de quanto em quanto tempo o relay procura eventos pendentes
     confirm-timeout-ms: 5000     # espera máxima pelo "ack" do RabbitMQ
     backfill-on-startup: true    # publica TransactionRegistered para transações antigas (antes dos eventos)
+
+# ===== Operação em produção (TP5): health checks, métricas e rastreamento =====
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true            # /actuator/health/liveness e /readiness (Kubernetes)
+      show-details: always
+      group:
+        readiness:
+          # pod só recebe tráfego se o banco estiver acessível; RabbitMQ fora do ar NÃO tira
+          # o serviço do ar (a outbox/retry cuidam disso) — resiliência da etapa anterior
+          include: readinessState,db
+  metrics:
+    tags:
+      application: ${spring.application.name}   # rótulo usado nos painéis do Grafana
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true               # permite calcular p95/p99 no Prometheus
+  tracing:
+    sampling:
+      # 1.0 = 100% das requisições rastreadas (ConfigMap do Kubernetes / compose de produção).
+      # Padrão 0.0 no desenvolvimento local: sem Tempo rodando, não há para onde exportar.
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.0}
+  otlp:
+    tracing:
+      endpoint: ${OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces}   # Grafana Tempo
+
+# Destino dos logs quando o profile "loki" está ativo (ver logback-spring.xml)
+logging:
+  loki:
+    url: ${LOKI_URL:http://localhost:3100}
