@@ -1,0 +1,21 @@
+# Prometheus no Docker Compose: alvos fixos (nomes dos serviços na rede do compose).
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: finora-apps
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["server-service:8761"]
+        labels: { service: server-service }
+      - targets: ["gateway-service:8080"]
+        labels: { service: gateway-service }
+      - targets: ["finora:8082"]
+        labels: { service: finora }
+      - targets: ["reports-service:8083"]
+        labels: { service: reports-service }
+  - job_name: finora-apps-rabbitmq
+    metrics_path: /metrics/per-object
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+        labels: { service: rabbitmq }
