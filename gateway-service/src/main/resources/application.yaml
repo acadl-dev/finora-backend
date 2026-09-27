@@ -1,0 +1,33 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway-service
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+            # Contexto de Identidade e Transações -> microsserviço finora
+            - id: finora-auth
+              uri: lb://finora
+              predicates:
+                - Path=/auth/**
+            - id: finora-transactions
+              uri: lb://finora
+              predicates:
+                - Path=/transactions,/transactions/**
+            # Contexto de Relatórios -> reports-service
+            - id: reports
+              uri: lb://reports-service
+              predicates:
+                - Path=/reports,/reports/**
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+  instance:
+    # ambiente local: todos os serviços rodam na mesma máquina
+    hostname: ${EUREKA_INSTANCE_HOSTNAME:localhost}

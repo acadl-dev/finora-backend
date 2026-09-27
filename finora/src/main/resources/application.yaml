@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: finora
+  # Lê o .env (JWT_SECRET) seja qual for a pasta de execução: a do serviço,
+  # de back_finora (IntelliJ aberto na raiz) ou da pasta do projeto
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:./finora/.env[.properties]
+      - optional:file:./back_finora/finora/.env[.properties]
+  datasource:
+    url: jdbc:postgresql://localhost:5433/finora
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    show-sql: true
+
+server:
+  port: 8082
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+  instance:
+    # ambiente local: todos os serviços rodam na mesma máquina
+    hostname: ${EUREKA_INSTANCE_HOSTNAME:localhost}
+
+# Segredo usado para assinar/validar o JWT (JwtService usa ${jwt.secret})
+jwt:
+  secret: ${JWT_SECRET}

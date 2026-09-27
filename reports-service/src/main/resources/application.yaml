@@ -1,0 +1,44 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: reports-service
+  # Lê o .env (JWT_SECRET) seja qual for a pasta de execução: a do serviço,
+  # de back_finora (IntelliJ aberto na raiz) ou da pasta do projeto
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:./reports-service/.env[.properties]
+      - optional:file:./back_finora/reports-service/.env[.properties]
+  datasource:
+    url: jdbc:postgresql://localhost:5434/finora_reports
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    show-sql: true
+  cloud:
+    openfeign:
+      client:
+        config:
+          finora:
+            connect-timeout: 5000
+            read-timeout: 10000
+
+# Mesmo segredo usado pelo finora para assinar o JWT (lido do .env)
+jwt:
+  secret: ${JWT_SECRET}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+  instance:
+    # ambiente local: todos os serviços rodam na mesma máquina
+    hostname: ${EUREKA_INSTANCE_HOSTNAME:localhost}

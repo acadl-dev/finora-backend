@@ -1,0 +1,17 @@
+# Base de dados própria do reports-service (Database per Service)
+services:
+  postgres-reports:
+    image: postgres:13
+    container_name: postgres_finora_reports
+    restart: always
+    ports:
+      - "5434:5432"
+    environment:
+      - POSTGRES_DB=finora_reports
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - postgres_reports_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_reports_data:
