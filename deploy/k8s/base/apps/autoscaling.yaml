@@ -1,0 +1,76 @@
+# Escalabilidade automática (HPA) e disponibilidade (PDB) dos serviços de negócio.
+# O HPA precisa do metrics-server (ver docs/implantacao.md).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: finora
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: finora
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 60
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: reports-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: reports-service
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 60
+---
+# Em manutenções (ex.: drenar um nó) sempre sobra ao menos 1 pod atendendo
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: finora
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: finora
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: reports-service
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: reports-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gateway-service
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: gateway-service

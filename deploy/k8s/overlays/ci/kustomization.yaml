@@ -1,0 +1,47 @@
+# Implantação usada pelo pipeline de CD (GitHub Actions) num cluster efêmero (kind):
+# só backend (sem front e sem observabilidade), imagens publicadas no GHCR.
+# O workflow ajusta as tags das imagens com "kustomize edit set image" e gera secrets.env.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: finora
+resources:
+  - ../../base
+secretGenerator:
+  - name: finora-secrets
+    envs:
+      - secrets.env
+generatorOptions:
+  disableNameSuffixHash: true
+patches:
+  # sem Tempo/Loki no cluster de teste: desliga o envio de traces e o appender do Loki
+  - target:
+      kind: ConfigMap
+      name: finora-config
+    patch: |-
+      - op: replace
+        path: /data/TRACING_SAMPLING_PROBABILITY
+        value: "0.0"
+      - op: replace
+        path: /data/SPRING_PROFILES_ACTIVE
+        value: "default"
+  # runner do GitHub tem poucos recursos: 1 réplica de cada
+  - target:
+      kind: HorizontalPodAutoscaler
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: "finora|reports-service|gateway-service"
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Service
+      name: "server-service|gateway-service|rabbitmq-management"
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: ClusterIP

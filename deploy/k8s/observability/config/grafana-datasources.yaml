@@ -1,0 +1,37 @@
+# Fontes de dados do Grafana, já ligadas entre si:
+#  - Loki -> Tempo: o traceId de uma linha de log vira link para o trace
+#  - Tempo -> Loki: de um span, "Logs for this span" abre os logs daquela transação
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      derivedFields:
+        - name: traceId
+          datasourceUid: tempo
+          matcherRegex: "traceId=(\\w+)"
+          url: "$${__value.raw}"
+          urlDisplayLabel: "Ver trace no Tempo"
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      nodeGraph:
+        enabled: true
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+        customQuery: true
+        query: '{app=~".+"} |= "$${__span.traceId}"'

@@ -1,0 +1,83 @@
+# Eureka Server (service discovery). Painel em http://localhost:8761 (Docker Desktop).
+apiVersion: v1
+kind: Service
+metadata:
+  name: server-service
+  labels:
+    app: server-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: server-service
+  ports:
+    - name: http
+      port: 8761
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server-service
+  labels:
+    app: server-service
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: server-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0   # zero downtime: sobe o novo pod antes de derrubar o antigo
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: server-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8761"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: server-service
+          image: ghcr.io/acadl-dev/server-service:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8761
+          envFrom:
+            - configMapRef:
+                name: finora-config
+          # Probes do Spring Boot Actuator
+          startupProbe:          # até ~3 min para a JVM subir
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:        # só recebe tráfego quando está pronto
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:         # reiniciado automaticamente se travar
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 15
+            failureThreshold: 4
+          lifecycle:
+            preStop:             # dá tempo do Eureka/Service pararem de enviar tráfego
+              exec:
+                command: ["sh", "-c", "sleep 10"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi

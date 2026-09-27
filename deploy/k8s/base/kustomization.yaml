@@ -1,0 +1,23 @@
+# Base da implantação do Finora no Kubernetes (namespace "finora").
+# Não é aplicada sozinha: use um overlay (overlays/local ou overlays/ci), que gera o Secret.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: finora
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: finora
+    includeSelectors: false
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  # dados e mensageria
+  - data/postgres-finora.yaml
+  - data/postgres-reports.yaml
+  - data/rabbitmq.yaml
+  # microsserviços
+  - apps/server-service.yaml
+  - apps/gateway-service.yaml
+  - apps/finora.yaml
+  - apps/reports-service.yaml
+  # escalabilidade e disponibilidade
+  - apps/autoscaling.yaml

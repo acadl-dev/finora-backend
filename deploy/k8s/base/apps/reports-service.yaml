@@ -1,0 +1,107 @@
+# reports-service: Relatórios (consumidor de eventos + workers). Escala com HPA (2 a 5 pods).
+apiVersion: v1
+kind: Service
+metadata:
+  name: reports-service
+  labels:
+    app: reports-service
+spec:
+  selector:
+    app: reports-service
+  ports:
+    - name: http
+      port: 8083
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reports-service
+  labels:
+    app: reports-service
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: reports-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0   # zero downtime: sobe o novo pod antes de derrubar o antigo
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: reports-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8083"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      terminationGracePeriodSeconds: 45
+      # só inicia depois que as dependências aceitam conexões (evita crash-loop na subida)
+      initContainers:
+        - name: wait-dependencies
+          image: busybox:1.36
+          command: ["sh", "-c", 'until nc -z postgres-reports 5432; do echo "aguardando postgres-reports:5432"; sleep 2; done && until nc -z rabbitmq 5672; do echo "aguardando rabbitmq:5672"; sleep 2; done && until nc -z server-service 8761; do echo "aguardando server-service:8761"; sleep 2; done']
+      containers:
+        - name: reports-service
+          image: ghcr.io/acadl-dev/reports-service:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8083
+          envFrom:
+            - configMapRef:
+                name: finora-config
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://postgres-reports:5432/finora_reports"
+            - name: SPRING_DATASOURCE_USERNAME
+              value: "postgres"
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: finora-secrets
+                  key: POSTGRES_PASSWORD
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: finora-secrets
+                  key: RABBITMQ_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: finora-secrets
+                  key: JWT_SECRET
+          # Probes do Spring Boot Actuator
+          startupProbe:          # até ~3 min para a JVM subir
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:        # só recebe tráfego quando está pronto
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:         # reiniciado automaticamente se travar
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 15
+            failureThreshold: 4
+          lifecycle:
+            preStop:             # dá tempo do Eureka/Service pararem de enviar tráfego
+              exec:
+                command: ["sh", "-c", "sleep 10"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi

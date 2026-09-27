@@ -1,0 +1,78 @@
+# PostgreSQL do reports-service (Relatórios) — Database per Service.
+# StatefulSet + volume persistente: os dados sobrevivem a reinícios do pod.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-reports
+  labels:
+    app: postgres-reports
+spec:
+  clusterIP: None
+  selector:
+    app: postgres-reports
+  ports:
+    - name: postgres
+      port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-reports
+  labels:
+    app: postgres-reports
+spec:
+  serviceName: postgres-reports
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-reports
+  template:
+    metadata:
+      labels:
+        app: postgres-reports
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:13
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: finora_reports
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: finora-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "finora_reports"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "finora_reports"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
