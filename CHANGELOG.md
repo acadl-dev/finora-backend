@@ -3,6 +3,19 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
 [versionamento semântico](https://semver.org/lang/pt-BR/).
 
+## [5.1.0] — AT: documentação da arquitetura
+
+### Adicionado
+- `docs/arquitetura.md`: subdomínios e bounded contexts (mapa de contextos e blocos táticos do DDD),
+  diagrama de componentes, componentes internos de cada microsserviço, topologia do RabbitMQ,
+  diagramas de sequência (login, registro de transação com outbox, remoção com lápide, relatório
+  assíncrono, rastreamento distribuído), modelo de dados dos dois bancos, histórico de mudanças dos
+  dados, prós e contras da arquitetura orientada a eventos, diagrama de implantação e evolução da
+  arquitetura.
+
+### Corrigido
+- Fim de linha de `finora/docker-compose.yml` normalizado (LF), conforme o `.gitattributes`.
+
 ## [5.0.0] — TP5: implantação e manutenção em produção
 
 ### Adicionado

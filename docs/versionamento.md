@@ -40,6 +40,7 @@ Tipos: `feat`, `fix`, `refactor`, `test`, `docs`, `ci`, `build`, `chore`, `perf`
 | `v2.0.0` | TP2 — microsserviços: Eureka, Gateway, reports-service com banco próprio |
 | `v3.0.0` | TP3/TP4 — arquitetura orientada a eventos com RabbitMQ |
 | `v5.0.0` | TP5 — Docker, Kubernetes, observabilidade, CI/CD e testes abrangentes |
+| `v5.1.0` | AT — documentação completa da arquitetura (diagramas de componentes e de sequência) |
 
 As mudanças de cada versão estão no [CHANGELOG](../CHANGELOG.md). Cada imagem Docker também
 é versionada (tag `sha-<commit>` e a versão semântica), ligando o que roda no cluster ao código.

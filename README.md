@@ -32,10 +32,14 @@ Todos ──► logs: Loki · traces: Tempo · métricas: Prometheus ──► G
 Stack: Java 21, Spring Boot 3.5, Spring Cloud 2025.0, Spring AMQP, PostgreSQL 13, RabbitMQ 4,
 Micrometer + OpenTelemetry, Docker, Kubernetes (Kustomize), GitHub Actions.
 
+Diagramas de componentes, de sequência, modelo de dados, bounded contexts (DDD) e prós e contras da
+arquitetura orientada a eventos: **[docs/arquitetura.md](docs/arquitetura.md)**.
+
 ## Documentação
 
 | Documento | Conteúdo |
 |---|---|
+| [docs/arquitetura.md](docs/arquitetura.md) | Domínio (DDD), diagramas de componentes e de sequência, topologia do RabbitMQ, modelo de dados, histórico de dados, prós e contras da EDA |
 | [docs/implantacao.md](docs/implantacao.md) | Docker, Kubernetes (Docker Desktop), escalabilidade, rolling update, rollback, problemas comuns |
 | [docs/monitoramento.md](docs/monitoramento.md) | Agregação de logs, rastreamento de transações, métricas, painel e health checks |
 | [docs/ci-cd.md](docs/ci-cd.md) | Pipelines do GitHub Actions, versionamento das imagens, deploy automatizado |
